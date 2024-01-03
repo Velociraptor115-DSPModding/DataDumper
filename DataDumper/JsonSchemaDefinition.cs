@@ -11,6 +11,15 @@ using UnityEngine;
 
 namespace DysonSphereProgram.Modding.DataDumper;
 
+public interface ISerializationContextProvider
+{
+  bool WriteNull { get; }
+  bool WriteEmpty { get; }
+  bool WriteDefault { get; }
+  bool ShouldSerializeType(Type type);
+  DataType GetDataType(Type type);
+}
+
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(StringType), typeDiscriminator: "string")]
 [JsonDerivedType(typeof(NumberType), typeDiscriminator: "number")]
@@ -19,12 +28,21 @@ namespace DysonSphereProgram.Modding.DataDumper;
 [JsonDerivedType(typeof(ObjectType), typeDiscriminator: "object")]
 public abstract class DataType
 {
-  public abstract void Write(Utf8JsonWriter writer, object value);
+  public void WriteWithNullHandling(ISerializationContextProvider ctx, Utf8JsonWriter writer, object? value)
+  {
+    if (value == null)
+    {
+      writer.WriteNullValue();
+      return;
+    }
+    Write(ctx, writer, value);
+  }
+  public abstract void Write(ISerializationContextProvider ctx, Utf8JsonWriter writer, object value);
 }
 
 public class StringType : DataType
 {
-  public override void Write(Utf8JsonWriter writer, object value)
+  public override void Write(ISerializationContextProvider ctx, Utf8JsonWriter writer, object value)
   {
     writer.WriteStringValue(Convert.ToString(value));
   }
@@ -32,7 +50,7 @@ public class StringType : DataType
 
 public class NumberType : DataType
 {
-  public override void Write(Utf8JsonWriter writer, object value)
+  public override void Write(ISerializationContextProvider ctx, Utf8JsonWriter writer, object value)
   {
     writer.WriteNumberValue(Convert.ToDecimal(value));
   }
@@ -40,7 +58,7 @@ public class NumberType : DataType
 
 public class BooleanType : DataType
 {
-  public override void Write(Utf8JsonWriter writer, object value)
+  public override void Write(ISerializationContextProvider ctx, Utf8JsonWriter writer, object value)
   {
     writer.WriteBooleanValue(Convert.ToBoolean(value));
   }
@@ -54,7 +72,7 @@ public class ArrayType : DataType
   }
   
   public DataType ElementType { get; set; }
-  public override void Write(Utf8JsonWriter writer, object value)
+  public override void Write(ISerializationContextProvider ctx, Utf8JsonWriter writer, object value)
   {
     var array = value as IList;
     if (array == null)
@@ -63,9 +81,27 @@ public class ArrayType : DataType
     writer.WriteStartArray();
     foreach (var item in array)
     {
-      ElementType.Write(writer, item);
+      ElementType.WriteWithNullHandling(ctx, writer, item);
     }
     writer.WriteEndArray();
+  }
+}
+
+public class UnknownType : DataType
+{
+  private Type type;
+  
+  public UnknownType(Type type)
+  {
+    this.type = type;
+  }
+  
+  public override void Write(ISerializationContextProvider ctx, Utf8JsonWriter writer, object value)
+  {
+    writer.WriteStartObject();
+    writer.WriteBoolean("isUnknown", true);
+    writer.WriteString("dotnetType", type.FullName);
+    writer.WriteEndObject();
   }
 }
 
@@ -81,14 +117,19 @@ public struct ObjectMemberReference
   public string Name { get; set; }
   public DataType DataType { get; set; }
   
-  private static readonly BindingFlags bFlags = BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance; 
+  private static readonly BindingFlags bFlagsInstance = BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance;
+  private static readonly BindingFlags bFlagsStatic = BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static;
 
-  public object? GetMember(object obj, bool debug = false)
+  public object? GetMember(object obj)
   {
+    var isType = obj is Type;
+    var type = isType ? obj as Type : obj.GetType();
+    var bFlags = isType ? bFlagsStatic :  bFlagsInstance;
+    var inst = isType ? null : obj;
     return Type switch
     {
-      ObjectMemberType.Field => obj.GetType().GetField(Name, bFlags)?.GetValue(obj),
-      ObjectMemberType.Property => obj.GetType().GetProperty(Name, bFlags)?.GetValue(obj),
+      ObjectMemberType.Field => type.GetField(Name, bFlags)?.GetValue(inst),
+      ObjectMemberType.Property => type.GetProperty(Name, bFlags)?.GetValue(inst),
       _ => null
     };
   }
@@ -96,24 +137,107 @@ public struct ObjectMemberReference
 
 public class ObjectType : DataType
 {
-  public ObjectType(List<ObjectMemberReference> fields)
+  public ObjectType(List<ObjectMemberReference> members, bool useInference, bool @static, List<string> include, List<string> exclude)
   {
-    Fields = fields;
+    Members = members ?? new();
+    UseInference = useInference;
+    Static = @static;
+    Include = include ?? new();
+    Exclude = exclude ?? new();
   }
 
-  public List<ObjectMemberReference> Fields { get; set; }
-
-  public override void Write(Utf8JsonWriter writer, object value)
+  public List<ObjectMemberReference> Members { get; set; }
+  public bool UseInference { get; set; }
+  public bool Static { get; set; }
+  public List<string> Include { get; set; }
+  public List<string> Exclude { get; set; }
+  public bool? WriteNull { get; set; }
+  public bool? WriteEmpty { get; set; }
+  public bool? WriteDefault { get; set; }
+  
+  private bool ShouldHandleMember(string name, Type type, ISerializationContextProvider ctx, HashSet<string> handledMembers)
   {
-    writer.WriteStartObject();
-    foreach (var field in Fields)
+    if (handledMembers.Contains(name))
+      return false;
+    if (Exclude.Contains(name))
+      return false;
+    if (!Include.Contains(name))
     {
-      var memberValue = field.GetMember(value);
+      if (Exclude.Contains("*"))
+        return false;
+      var normalizedType = TypeSerializationDescription.NormalizeInterestingType(type);
+      if (normalizedType == null)
+        return false;
+      if (!ctx.ShouldSerializeType(normalizedType))
+        return false;
+    }
+
+    return true;
+  }
+  
+  private bool ShouldWriteMember(Type type, object? value, ISerializationContextProvider ctx)
+  {
+    if (value == null)
+      return WriteNull ?? ctx.WriteNull;
+    if (value is IList { Count: 0 })
+      return WriteEmpty ?? ctx.WriteEmpty;
+    if (value is "")
+      return WriteEmpty ?? ctx.WriteEmpty;
+    if (type.IsValueType)
+    {
+      var defaultVal = Activator.CreateInstance(type);
+      if (value.Equals(defaultVal))
+        return WriteDefault ?? ctx.WriteDefault;
+    }
+
+    return true;
+  }
+
+  public override void Write(ISerializationContextProvider ctx, Utf8JsonWriter writer, object value)
+  {
+    var handledMembers = new HashSet<string>();
+    writer.WriteStartObject();
+    foreach (var member in Members)
+    {
+      var memberValue = member.GetMember(value);
 
       if (memberValue != null)
       {
+        writer.WritePropertyName(member.Name);
+        member.DataType.WriteWithNullHandling(ctx, writer, memberValue);
+        handledMembers.Add(member.Name);
+      }
+    }
+    if (UseInference)
+    {
+      var isType = value is Type;
+      var bFlags = BindingFlags.Public | BindingFlags.NonPublic | (isType ? BindingFlags.Static : BindingFlags.Instance);
+      var type = isType ? value as Type : value.GetType();
+      var inst = isType ? null : value;
+      var fields = type.GetFields(bFlags);
+      foreach (var field in fields)
+      {
+        var fieldType = field.FieldType;
+        if (!ShouldHandleMember(field.Name, fieldType, ctx, handledMembers))
+          continue;
+        var fieldVal = field.GetValue(inst);
+        if (!ShouldWriteMember(fieldType, fieldVal, ctx))
+          continue;
         writer.WritePropertyName(field.Name);
-        field.DataType.Write(writer, memberValue);
+        ctx.GetDataType(fieldType).WriteWithNullHandling(ctx, writer, fieldVal);
+      }
+      
+      var properties = type.GetProperties(bFlags);
+      foreach (var property in properties)
+      {
+        var propertyType = property.PropertyType;
+        if (!ShouldHandleMember(property.Name, property.PropertyType, ctx, handledMembers))
+          continue;
+        var propertyVal = property.GetValue(inst);
+        if (!ShouldWriteMember(propertyType, propertyVal, ctx))
+          continue;
+        writer.WritePropertyName(property.Name);
+        ctx.GetDataType(propertyType).WriteWithNullHandling(ctx, writer, propertyVal);
       }
     }
     writer.WriteEndObject();
@@ -134,12 +258,56 @@ public struct CustomSerializerObjectReferenceItem
   public string Name { get; set; }
 }
 
-public class CustomJsonSerializer
+public class CustomJsonSerializer: ISerializationContextProvider
 {
   public List<CustomSerializerObjectReferenceItem> RootObject { get; set; }
   public DataType Schema { get; set; }
+  public Dictionary<string, DataType> TypeSchemas { get; set; } = new();
+  public List<string> ExcludeTypes { get; set; } = new();
+  public List<string> IncludeTypes { get; set; } = new();
+  public List<string> ExcludeNamespaces { get; set; } = new();
+  public List<string> IncludeNamespaces { get; set; } = new();
+  public bool UseImplicitInferenceForUnknownTypes { get; set; }
+  public bool WriteNull { get; set; }
+  public bool WriteEmpty { get; set; }
+  public bool WriteDefault { get; set; }
   
-  public bool UseInference { get; set; }
+  public bool ShouldSerializeType(Type type)
+  {
+    if (ExcludeTypes.Contains(type.FullName))
+      return false;
+    if (IncludeTypes.Contains(type.FullName))
+      return true;
+    if (IncludeNamespaces.Any(x => (type.Namespace ?? "ROOT").StartsWith(x)))
+      return true;
+    if (ExcludeNamespaces.Any(x => (type.Namespace ?? "ROOT").StartsWith(x)))
+      return false;
+    return true;
+  }
+  
+  public DataType GetDataType(Type type)
+  {
+    if (TypeSchemas.ContainsKey(type.FullName))
+      return TypeSchemas[type.FullName];
+    if (type == typeof(bool))
+      return new BooleanType();
+    if (type.IsPrimitive || type == typeof(decimal))
+      return new NumberType();
+    if (type.IsEnum || type == typeof(string))
+      return new StringType();
+    if (type.IsArray)
+      return new ArrayType(GetDataType(type.GetElementType()));
+    var iListInterfaces = type.FindInterfaces((x, y) => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IList<>), null);
+    if (iListInterfaces.Length > 0)
+    {
+      return new ArrayType(GetDataType(iListInterfaces[0].GenericTypeArguments[0]));
+    }
+
+    if (UseImplicitInferenceForUnknownTypes)
+      return new ObjectType(new List<ObjectMemberReference>(), true, false, new List<string>(), new List<string>());
+    else
+      return new UnknownType(type);
+  }
 
   private object? GetRootObjectReference()
   {
@@ -191,7 +359,7 @@ public class CustomJsonSerializer
     if (rootObj == null)
       throw new Exception("Expected to find rootObj");
     var writer = new Utf8JsonWriter(stream, options);
-    Schema.Write(writer, rootObj);
+    Schema.Write(this, writer, rootObj);
     writer.Flush();
   }
 }
@@ -247,15 +415,9 @@ public class TypeSerializationDescription
   public static Type? NormalizeInterestingType(Type? type)
   {
     if (type == null)
-      return null;
-    if (type == typeof(UnityEngine.Sprite))
-      return null;
-    if (type.FullName.StartsWith("UnityEngine") && !type.FullName.Contains("Vector"))
-      return null;
-    if (type == typeof(VertaBuffer) || type == typeof(WreckageHandler) || type == typeof(WreckageFragment))
-      return null;
+      return type;
     if (IsTrivialType(type))
-      return null;
+      return type;
     if (type.IsArray)
       return NormalizeInterestingType(type.GetElementType());
 
