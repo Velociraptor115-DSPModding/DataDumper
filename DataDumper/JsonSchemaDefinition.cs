@@ -146,7 +146,8 @@ public class CustomJsonSerializer
     var assembly = typeof(LDB).Assembly;
     object typeObj = assembly;
     var enumerator = RootObject.GetEnumerator();
-    while (enumerator.MoveNext() && enumerator.Current.Type == CustomSerializerObjectReferenceItemType.Type)
+    bool hasMore = false;
+    while ((hasMore = enumerator.MoveNext()) && enumerator.Current.Type == CustomSerializerObjectReferenceItemType.Type)
     {
       typeObj = assembly.GetType(enumerator.Current.Name);
     }
@@ -159,6 +160,9 @@ public class CustomJsonSerializer
     var staticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
     var instanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     var currentBindingFlags = staticFlags;
+
+    if (!hasMore)
+      return currentObj;
 
     do
     {
