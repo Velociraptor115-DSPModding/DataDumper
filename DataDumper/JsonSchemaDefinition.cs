@@ -258,8 +258,8 @@ public class TypeSerializationDescription
     var iListInterfaces = type.FindInterfaces((x, y) => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IList<>), null);
     if (iListInterfaces.Length > 0)
     {
-      Plugin.Logger.LogInfo($"Found IList interface(s) on {type.FullName} - {string.Join(",", iListInterfaces.Select(x => x.FullName))}");
-      return iListInterfaces[0].GenericTypeArguments[0];
+      // Plugin.Logger.LogInfo($"Found IList interface(s) on {type.FullName} - {string.Join(",", iListInterfaces.Select(x => x.FullName))}");
+      return NormalizeInterestingType(iListInterfaces[0].GenericTypeArguments[0]);
     }
     return type;
   }
