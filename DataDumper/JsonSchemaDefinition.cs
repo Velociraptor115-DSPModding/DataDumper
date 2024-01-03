@@ -331,7 +331,7 @@ public class CustomJsonSerializer: ISerializationContextProvider
 
     if (!hasMore)
       return currentObj;
-
+    
     do
     {
       var item = enumerator.Current;
@@ -368,7 +368,12 @@ public class CustomJsonSerializer: ISerializationContextProvider
 [JsonSerializable(typeof(DataType))]
 [JsonSerializable(typeof(Dictionary<string, TypeSerializationDescription>))]
 [JsonSerializable(typeof(Dictionary<string, CustomJsonSerializer>))]
-[JsonSourceGenerationOptions(UseStringEnumConverter = true, WriteIndented = true)]
+[JsonSourceGenerationOptions(
+  UseStringEnumConverter = true,
+  WriteIndented = true,
+  ReadCommentHandling = JsonCommentHandling.Skip,
+  AllowTrailingCommas = true
+)]
 public partial class CustomJsonSerializerContext : JsonSerializerContext;
 
 public class TypeSerializationDescription

@@ -16,9 +16,11 @@ public class ProtoDumpJson
     var serializerOpts = new JsonSerializerOptions()
     {
       WriteIndented = true,
+      ReadCommentHandling = JsonCommentHandling.Skip,
+      AllowTrailingCommas = true,
       TypeInfoResolverChain = { CustomJsonSerializerContext.Default }
     };
-
+    
     var allInOneConfigFile = $"{jsonDumpDir}/config.json";
     var configDir = $"{jsonDumpDir}/config";
 
