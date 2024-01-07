@@ -8,13 +8,21 @@ using System.Text.Json.Serialization;
 
 namespace DysonSphereProgram.Modding.DataDumper;
 
-public class SerializationContextProvider(CustomJsonSerializer serializer) : ISerializationContextProvider
+public class SerializationContextProvider(CustomJsonSerializer serializer, string ripRootPath) : ISerializationContextProvider
 {
   public bool WriteNull => serializer.WriteNull;
   public bool WriteEmpty => serializer.WriteEmpty;
   public bool WriteDefault => serializer.WriteDefault;
   public bool ShouldSerializeType(Type type) => serializer.ShouldSerializeType(type);
   public DataType GetDataType(Type type) => serializer.GetDataType(type);
+
+  private readonly List<string> _contextPath = new();
+  public IReadOnlyList<string> ContextPath => _contextPath;
+  public void PushContext(string pathItem) => _contextPath.Add(pathItem);
+  public void PopContext() => _contextPath.RemoveAt(_contextPath.Count - 1);
+
+  public bool ImageRipEnabled => serializer.ImageRipEnabled;
+  public string RipRootPath => ripRootPath;
 }
 
 public enum CustomSerializerObjectReferenceItemType
@@ -44,6 +52,7 @@ public class CustomJsonSerializer
   public bool WriteNull { get; set; }
   public bool WriteEmpty { get; set; }
   public bool WriteDefault { get; set; }
+  public bool ImageRipEnabled { get; set; }
   
   public bool ShouldSerializeType(Type type)
   {
@@ -126,13 +135,13 @@ public class CustomJsonSerializer
     return currentObj;
   }
 
-  public void Serialize(Stream stream, JsonWriterOptions options)
+  public void Serialize(string ripRootPath, Stream stream, JsonWriterOptions options)
   {
     var rootObj = GetRootObjectReference();
     if (rootObj == null)
       throw new Exception("Expected to find rootObj");
     using var writer = new Utf8JsonWriter(stream, options);
-    Schema.Write(new SerializationContextProvider(this), writer, rootObj);
+    Schema.Write(new SerializationContextProvider(this, ripRootPath), writer, rootObj);
     writer.Flush();
   }
 }

@@ -10,4 +10,11 @@ public interface ISerializationContextProvider
   bool WriteDefault { get; }
   bool ShouldSerializeType(Type type);
   DataType GetDataType(Type type);
+  
+  IReadOnlyList<string> ContextPath { get; }
+  void PushContext(string pathItem);
+  void PopContext();
+  
+  bool ImageRipEnabled { get; }
+  string RipRootPath { get; }
 }

@@ -17,16 +17,20 @@ namespace DysonSphereProgram.Modding.DataDumper;
 [JsonDerivedType(typeof(BooleanType), typeDiscriminator: "bool")]
 [JsonDerivedType(typeof(ArrayType), typeDiscriminator: "array")]
 [JsonDerivedType(typeof(ObjectType), typeDiscriminator: "object")]
+[JsonDerivedType(typeof(TextureType), typeDiscriminator: "texture")]
+[JsonDerivedType(typeof(SpriteType), typeDiscriminator: "sprite")]
 public abstract class DataType
 {
-  public void WriteWithNullHandling(ISerializationContextProvider ctx, Utf8JsonWriter writer, object? value)
+  public void RecursiveWrite(ISerializationContextProvider ctx, string pathItem, Utf8JsonWriter writer, object? value)
   {
+    ctx.PushContext(pathItem);
     if (value == null)
     {
       writer.WriteNullValue();
       return;
     }
     Write(ctx, writer, value);
+    ctx.PopContext();
   }
   public abstract void Write(ISerializationContextProvider ctx, Utf8JsonWriter writer, object value);
 }
@@ -55,6 +59,54 @@ public class BooleanType : DataType
   }
 }
 
+public abstract class ImageType : DataType
+{
+  protected abstract byte[]? GetPngBytes(object value);
+  
+  public override void Write(ISerializationContextProvider ctx, Utf8JsonWriter writer, object value)
+  {
+    if (!ctx.ImageRipEnabled)
+    {
+      writer.WriteStringValue("__ImageRip__");
+      return;
+    }
+
+    var bytes = GetPngBytes(value);
+    if (bytes is not { Length: > 0 })
+    {
+      writer.WriteNullValue();
+      return;
+    }
+
+    var relativePath = $"{string.Join("/", ctx.ContextPath)}.png";
+    var ripPath = Path.Combine(ctx.RipRootPath, relativePath);
+    Directory.CreateDirectory(Path.GetDirectoryName(ripPath));
+    File.WriteAllBytes(ripPath, bytes);
+    writer.WriteStringValue(relativePath);
+  }
+}
+
+public class SpriteType : ImageType
+{
+  protected override byte[]? GetPngBytes(object value)
+  {
+    if (value is Sprite sprite)
+      return TextureRip.GetPngBytes(sprite);
+    return null;
+  }
+}
+
+public class TextureType : ImageType
+{
+  protected override byte[]? GetPngBytes(object value)
+  {
+    if (value is Texture texture)
+      return TextureRip.GetPngBytes(texture);
+    return null;
+  }
+}
+
+
 public class ArrayType : DataType
 {
   public ArrayType(DataType elementType)
@@ -70,9 +122,9 @@ public class ArrayType : DataType
       throw new Exception("Expected IList");
     
     writer.WriteStartArray();
-    foreach (var item in array)
+    for (int i = 0; i < array.Count; i++)
     {
-      ElementType.WriteWithNullHandling(ctx, writer, item);
+      ElementType.RecursiveWrite(ctx, i.ToString(), writer, array[i]);
     }
     writer.WriteEndArray();
   }
@@ -195,7 +247,7 @@ public class ObjectType : DataType
       if (memberValue != null)
       {
         writer.WritePropertyName(member.Name);
-        member.DataType.WriteWithNullHandling(ctx, writer, memberValue);
+        member.DataType.RecursiveWrite(ctx, member.Name, writer, memberValue);
         handledMembers.Add(member.Name);
       }
     }
@@ -215,7 +267,7 @@ public class ObjectType : DataType
         if (!ShouldWriteMember(fieldType, fieldVal, ctx))
           continue;
         writer.WritePropertyName(field.Name);
-        ctx.GetDataType(fieldType).WriteWithNullHandling(ctx, writer, fieldVal);
+        ctx.GetDataType(fieldType).RecursiveWrite(ctx, field.Name, writer, fieldVal);
       }
       
       var properties = type.GetProperties(bFlags);
@@ -228,7 +280,7 @@ public class ObjectType : DataType
         if (!ShouldWriteMember(propertyType, propertyVal, ctx))
           continue;
         writer.WritePropertyName(property.Name);
-        ctx.GetDataType(propertyType).WriteWithNullHandling(ctx, writer, propertyVal);
+        ctx.GetDataType(propertyType).RecursiveWrite(ctx, property.Name, writer, propertyVal);
       }
     }
     writer.WriteEndObject();

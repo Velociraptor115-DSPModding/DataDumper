@@ -49,10 +49,12 @@ public class ProtoDumpJson
     var dumpFolder = $"{jsonDumpDir}/dumped";
     Directory.CreateDirectory(dumpFolder);
 
+    var ripFolder = $"{dumpFolder}/rips";
+
     foreach (var serializerConfigKvp in customSerializers)
     {
       using var stream = File.Open($"{dumpFolder}/{serializerConfigKvp.Key}.json", FileMode.Create, FileAccess.Write);
-      serializerConfigKvp.Value.Serialize(stream, new JsonWriterOptions()
+      serializerConfigKvp.Value.Serialize($"{ripFolder}/{serializerConfigKvp.Key}", stream, new JsonWriterOptions()
       {
         Indented = true
       });

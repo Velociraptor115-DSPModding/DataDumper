@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
@@ -18,7 +18,6 @@ public class Plugin : BaseUnityPlugin
     Logger = base.Logger;
     Logger.LogInfo($"Plugin {PLUGIN_GUID} is loaded!");
     
-    IconRip.Execute();
     ProtoDumpJson.Execute();
   }
 
