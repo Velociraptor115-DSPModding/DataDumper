@@ -12,32 +12,14 @@ public class IconRip
 
   private static void SaveAsPng(Sprite sprite, string path)
   {
-    // Log.LogInfo($"rect: {sprite.rect}");
-    // Log.LogInfo($"textureRect: {sprite.textureRect}");
+    if (sprite == null)
+    {
+      Plugin.Logger.LogWarning($"Sprite is null for {path}");
+      return;
+    }
     try
     {
-      var r = sprite.rect;
-      var output = new Texture2D((int)r.width, (int)r.height);
-      
-      var tmpRenderTexture =
-        RenderTexture.GetTemporary(
-          output.width,
-          output.height,
-          0,
-          RenderTextureFormat.Default,
-          RenderTextureReadWrite.sRGB
-        );
-      
-      Graphics.Blit(sprite.texture, tmpRenderTexture);
-      var previousRenderTexture = RenderTexture.active;
-      RenderTexture.active = tmpRenderTexture;
-      output.ReadPixels(new Rect(0, 0, tmpRenderTexture.width, tmpRenderTexture.height), 0, 0);
-      output.Apply();
-      RenderTexture.active = previousRenderTexture;
-      RenderTexture.ReleaseTemporary(tmpRenderTexture);
-      
-      output.name = sprite.texture.name + " " + sprite.name;
-      File.WriteAllBytes(path, output.EncodeToPNG());
+      File.WriteAllBytes(path, TextureRip.GetPngBytes(sprite));
     }
     catch (Exception e)
     {
