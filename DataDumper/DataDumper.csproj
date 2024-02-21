@@ -5,6 +5,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
+    <BepInExPluginGuid>dev.raptor.dsp.DataDumper</BepInExPluginGuid>
     <RootNamespace>DysonSphereProgram.Modding.DataDumper</RootNamespace>
   </PropertyGroup>
 
