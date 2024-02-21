@@ -10,7 +10,7 @@ public class ProtoDumpJson
 {
   public static void Execute()
   {
-    var jsonDumpDir = "/JsonDump";
+    var jsonDumpDir = Plugin.DumpPath.Value;
     if (!Directory.Exists(jsonDumpDir)) Directory.CreateDirectory(jsonDumpDir);
 
     var serializerOpts = new JsonSerializerOptions()
@@ -20,6 +20,8 @@ public class ProtoDumpJson
       AllowTrailingCommas = true,
       TypeInfoResolverChain = { CustomJsonSerializerContext.Default }
     };
+    
+    Plugin.Logger.LogInfo(Path.GetFullPath(jsonDumpDir));
     
     var allInOneConfigFile = $"{jsonDumpDir}/config.json";
     var configDir = $"{jsonDumpDir}/config";
